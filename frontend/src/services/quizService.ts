@@ -15,6 +15,8 @@ export type QuizData = {
   year?: string;
 };
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
 export const fetchNextQuiz = async (
   genre: string,
   answerType: string,
@@ -26,16 +28,16 @@ export const fetchNextQuiz = async (
   const playedParam = playedIds.length > 0 ? `&playedIds=${playedIds.join(',')}` : '';
   const customUrlParam = customPlaylistUrl ? `&customPlaylistUrl=${encodeURIComponent(customPlaylistUrl)}` : '';
 
+  // ICI ON UTILISE L'URL DE RENDER
   const response = await fetch(
-    `/api/quiz/next?genre=${genre}&type=${answerType}&gameType=${gameType}${playedParam}${customUrlParam}`
+    `${API_URL}/api/quiz/next?genre=${genre}&type=${answerType}&gameType=${gameType}${playedParam}${customUrlParam}`
   );
 
-  // 🛡️ SÉCURITÉ : On vérifie si la réponse est bien du JSON
   const contentType = response.headers.get("content-type");
   if (!contentType || !contentType.includes("application/json")) {
     const textError = await response.text();
-    console.error("Réponse HTML inattendue reçue du serveur :", textError.substring(0, 200));
-    throw new Error("Le serveur backend est injoignable ou a renvoyé une erreur HTML. (Regarde la console de ton terminal Node.js)");
+    console.error("Erreur serveur :", textError.substring(0, 200));
+    throw new Error("Le serveur backend est injoignable ou a renvoyé une erreur HTML.");
   }
   
   if (!response.ok) {

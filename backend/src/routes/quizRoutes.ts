@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { generateQuizData } from '../services/choiceService';
+import { generateMovieQuizData } from '../services/movieChoiceService';
 
 const router = Router();
 
@@ -8,6 +9,7 @@ router.get('/next', async (req: Request, res: Response) => {
   try {
     const genre = (req.query.genre as string) || 'all';
     const answerType = (req.query.type as string) || 'both';
+    const gameType = (req.query.gameType as string) || 'music'; // <-- C'était manquant
     
     // On récupère les IDs déjà joués pour éviter les doublons
     let playedIds: number[] = [];
@@ -17,8 +19,13 @@ router.get('/next', async (req: Request, res: Response) => {
     
     const customPlaylistUrl = req.query.customPlaylistUrl as string | undefined;
 
-    // Appel du service
-    const quizData = await generateQuizData(genre, answerType, playedIds, customPlaylistUrl);
+    let quizData;
+    // On aiguille vers le bon service
+    if (['movie', 'series', 'screen'].includes(gameType)) {
+      quizData = await generateMovieQuizData(gameType, playedIds);
+    } else {
+      quizData = await generateQuizData(genre, answerType, playedIds, customPlaylistUrl);
+    }
     
     res.json(quizData);
   } catch (error: any) {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, Music, Clapperboard, Timer, Target, Link2, ListFilter } from 'lucide-react';
+import { ArrowLeft, Music, Clapperboard, Timer, Target, Link2, ListFilter, Play } from 'lucide-react';
 import { Settings as SettingsType } from '../App';
 
 type SettingsProps = {
@@ -40,6 +40,24 @@ export default function Settings({ settings, setSettings, onSave, onBack, isMult
           </div>
 
           <div className="space-y-6">
+            
+            {/* --- NOUVEAU : DÉROULEMENT DU JEU (Classique vs Songless) --- */}
+            {isMusicMode && (
+              <div className="animate-in fade-in slide-in-from-top-2">
+                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] block mb-3 flex items-center gap-2">
+                  <Play className="w-3 h-3" /> Mode de jeu
+                </label>
+                <select 
+                  value={settings.mode} 
+                  onChange={e => setSettings(s => ({ ...s, mode: e.target.value as any }))}
+                  className="w-full bg-zinc-950 border border-zinc-800 p-4 rounded-xl font-bold outline-none focus:border-indigo-500"
+                >
+                  <option value="classic">⏱️ Classique (Continu)</option>
+                  <option value="progressive">🧩 Songless (Extraits progressifs)</option>
+                </select>
+              </div>
+            )}
+
             {/* MODE DE RÉPONSE */}
             <div>
               <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] block mb-3">Mode de réponse</label>

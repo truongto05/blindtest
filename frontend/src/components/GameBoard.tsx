@@ -76,7 +76,6 @@ const isCorrectFreeInput = (input: string, quizData: QuizData): boolean => {
 };
 
 export default function GameBoard({ settings, onGameEnd, isMultiplayer, roomCode, initialData }: GameBoardProps) {
-  // États de base
   const [quizData, setQuizData] = useState<QuizData | null>(initialData || null);
   const [isLoading, setIsLoading] = useState(!initialData);
   const [hasInteracted, setHasInteracted] = useState(!!isMultiplayer);
@@ -84,16 +83,13 @@ export default function GameBoard({ settings, onGameEnd, isMultiplayer, roomCode
   const [score, setScore] = useState<number>(0);
   const [history, setHistory] = useState<QuizData[]>(initialData ? [initialData] : []);
   
-  // Verrou pour le mode Solo (évite History 2 pour 1 manche)
   const hasStartedFirstLoad = useRef(false);
 
-  // Refs pour l'accès immédiat (onGameEnd)
   const scoreRef = useRef<number>(0);
   const historyRef = useRef<QuizData[]>([]);
   useEffect(() => { scoreRef.current = score; }, [score]);
   useEffect(() => { historyRef.current = history; }, [history]);
 
-  // États de jeu
   const [playedIds, setPlayedIds] = useState<Array<string | number>>(initialData ? [initialData.trackId] : []);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(settings.timeLimit);
@@ -104,7 +100,9 @@ export default function GameBoard({ settings, onGameEnd, isMultiplayer, roomCode
 
   const { isLoaded, isPlaying, playSegment, playFull, stop } = useAudio(quizData?.audioUrl || null);
 
-  // --- GESTION DES ROUNDS ---
+  // Un film n'a pas de musique, donc s'il n'y a pas d'URL audio, c'est considéré comme "prêt"
+  const isReady = quizData?.audioUrl ? isLoaded : true;
+
   useEffect(() => {
     if (isMultiplayer) {
       socket.on('new_round', (data: any) => {
@@ -116,7 +114,6 @@ export default function GameBoard({ settings, onGameEnd, isMultiplayer, roomCode
       socket.on('game_over', () => { onGameEnd(scoreRef.current, historyRef.current); });
       return () => { socket.off('new_round'); socket.off('game_over'); };
     } else {
-        // CORRECTION ICI : Utilisation du Ref pour bloquer le double chargement initial
         if (!initialData && currentRound === 1 && !quizData && !hasStartedFirstLoad.current) {
             hasStartedFirstLoad.current = true;
             loadNewRound();
@@ -137,16 +134,18 @@ export default function GameBoard({ settings, onGameEnd, isMultiplayer, roomCode
 
   // --- AUDIO & TIMER ---
   useEffect(() => {
-    if (isLoaded && !selectedAnswer && settings.mode === 'classic' && hasInteracted) playFull();
-  }, [isLoaded, selectedAnswer, hasInteracted]);
+    if (isLoaded && !selectedAnswer && settings.mode === 'classic' && hasInteracted && quizData?.audioUrl) {
+        playFull();
+    }
+  }, [isLoaded, selectedAnswer, hasInteracted, quizData]);
 
   useEffect(() => {
-    if (settings.mode === 'classic' && timeLeft > 0 && hasInteracted && !selectedAnswer) {
+    if (settings.mode === 'classic' && timeLeft > 0 && hasInteracted && !selectedAnswer && isReady) {
       const timer = setInterval(() => setTimeLeft((prev: number) => prev - 1), 1000);
       return () => clearInterval(timer);
     }
     if (timeLeft === 0 && !selectedAnswer) handleChoice('TEMPS_ECOULÉ');
-  }, [timeLeft, hasInteracted, selectedAnswer]);
+  }, [timeLeft, hasInteracted, selectedAnswer, isReady]);
 
   // --- AUTOCOMPLETE ---
   useEffect(() => {
@@ -172,7 +171,7 @@ export default function GameBoard({ settings, onGameEnd, isMultiplayer, roomCode
     const correct = choice === quizData.correctAnswer || (settings.answerMode === 'input' && choice !== 'TEMPS_ECOULÉ' && isCorrectFreeInput(choice, quizData));
     setSelectedAnswer(choice); setIsCorrect(correct);
     
-    const points = correct ? (settings.mode === 'classic' ? timeLeft * 20 : SONGLESS_TIERS[Math.max(0, unlockedIndex - 1)].points) : 0;
+    const points = correct ? (settings.mode === 'classic' ? timeLeft * 20 : SONGLESS_TIERS[Math.max(0, unlockedIndex - 1)]?.points || 0) : 0;
     if (correct) setScore((s: number) => s + points);
     
     if (isMultiplayer) {
@@ -226,26 +225,73 @@ export default function GameBoard({ settings, onGameEnd, isMultiplayer, roomCode
 
       {/* Zone Centrale */}
       <div className="flex-1 w-full max-w-2xl flex flex-col items-center justify-center relative">
-        <div className="relative w-64 h-64 flex items-center justify-center mb-12">
-          <svg className="absolute inset-0 w-full h-full -rotate-90 transform">
-            <circle cx="128" cy="128" r="120" stroke="currentColor" strokeWidth="4" fill="transparent" className="text-zinc-800" />
-            <circle cx="128" cy="128" r="120" stroke="currentColor" strokeWidth="4" fill="transparent" 
-              className="text-indigo-500 transition-all duration-1000" strokeDasharray={754}
-              strokeDashoffset={754 - (754 * timeLeft) / settings.timeLimit} strokeLinecap="round" />
-          </svg>
-          <div className={`w-48 h-48 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center shadow-2xl z-10 transition-all duration-500 ${isPlaying ? 'scale-110 border-indigo-500/50' : ''}`}>
-            {isPlaying ? (
-              <div className="flex items-end gap-1 h-12">
-                {[...Array(5)].map((_, i) => <div key={i} className="w-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.1}s`, height: `${40 + Math.random() * 60}%` }} />)}
-              </div>
-            ) : <Music2 className="w-12 h-12 text-zinc-700" />}
-          </div>
+        <div className="relative flex items-center justify-center mb-12">
+           {/* SVG pour le mode classique avec animation du timer */}
+           {settings.mode === 'classic' && (
+            <svg className="absolute w-72 h-72 -rotate-90 transform z-0">
+              <circle cx="144" cy="144" r="136" stroke="currentColor" strokeWidth="4" fill="transparent" className="text-zinc-800" />
+              <circle cx="144" cy="144" r="136" stroke="currentColor" strokeWidth="4" fill="transparent" 
+                className="text-indigo-500 transition-all duration-1000" strokeDasharray={855}
+                strokeDashoffset={855 - (855 * timeLeft) / settings.timeLimit} strokeLinecap="round" />
+            </svg>
+          )}
+
+          {/* Affichage adaptatif (Affiche ou Disque) */}
+          {['movie', 'series'].includes(quizData?.questionType || '') ? (
+             <div className="relative w-48 h-64 rounded-xl overflow-hidden shadow-2xl z-10 border-2 border-zinc-800 bg-zinc-900">
+             {quizData?.coverUrl ? (
+               <img 
+                 src={quizData.coverUrl} 
+                 alt="Affiche" 
+                 className="w-full h-full object-cover transition-all duration-1000"
+                 style={{ filter: `blur(${selectedAnswer ? 0 : (timeLeft / settings.timeLimit) * 20}px)` }}
+               />
+             ) : (
+               <div className="w-full h-full flex items-center justify-center"><Film className="w-12 h-12 text-zinc-600" /></div>
+             )}
+           </div>
+          ) : (
+            <div className={`relative w-56 h-56 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center shadow-2xl z-10 transition-all duration-500 ${isPlaying ? 'scale-110 border-indigo-500/50' : ''}`}>
+              {isPlaying ? (
+                <div className="flex items-end gap-1 h-12">
+                  {[...Array(5)].map((_, i) => <div key={i} className="w-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.1}s`, height: `${40 + Math.random() * 60}%` }} />)}
+                </div>
+              ) : <Music2 className="w-16 h-16 text-zinc-700" />}
+            </div>
+          )}
+
           <div className={`absolute w-full h-full rounded-full bg-indigo-500/10 blur-3xl transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`} />
         </div>
 
-        <div className="mb-10 flex flex-col items-center gap-3">
+        <div className="mb-8 flex flex-col items-center gap-3">
           <span className="bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest">{getQuestionBadge()}</span>
         </div>
+
+        {/* --- LE MODE SONGLESS (PROGRESSIF) EST DE RETOUR --- */}
+        {settings.mode === 'progressive' && quizData?.audioUrl && !selectedAnswer && (
+          <div className="flex flex-wrap justify-center gap-2 mb-8">
+            {SONGLESS_TIERS.map((tier, index) => {
+              const isUnlocked = index <= unlockedIndex;
+              const isNext = index === unlockedIndex;
+              
+              return (
+                <button
+                  key={index}
+                  onClick={() => {
+                    if (isNext) setUnlockedIndex(index + 1);
+                    playSegment(tier.time);
+                  }}
+                  disabled={index > unlockedIndex || !isReady} 
+                  className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${
+                    isUnlocked ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'bg-zinc-900 border border-zinc-800 text-zinc-600 cursor-not-allowed'
+                  }`}
+                >
+                  {tier.time}s
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Inputs / Choices */}
         <div className="w-full">
@@ -258,7 +304,8 @@ export default function GameBoard({ settings, onGameEnd, isMultiplayer, roomCode
                   else if (choice === selectedAnswer) style = 'bg-red-500 border-red-400 text-white';
                   else style = 'bg-zinc-950 border-zinc-900 opacity-20';
                 }
-                return <button key={i} disabled={!!selectedAnswer || !isLoaded} onClick={() => handleChoice(choice)} className={`${style} p-5 rounded-2xl border-2 font-bold text-lg transition-all duration-200`}>{choice}</button>;
+                // ON PERMET DE CLIQUER SI ISREADY EST VRAI (Audio ok, ou mode Film sans audio)
+                return <button key={i} disabled={!!selectedAnswer || !isReady} onClick={() => handleChoice(choice)} className={`${style} p-5 rounded-2xl border-2 font-bold text-lg transition-all duration-200`}>{choice}</button>;
               })}
             </div>
           ) : (
@@ -266,13 +313,13 @@ export default function GameBoard({ settings, onGameEnd, isMultiplayer, roomCode
               <div className="relative">
                 <input 
                   type="text" value={userInput} onChange={e => setUserInput(e.target.value)}
-                  disabled={!!selectedAnswer || !isLoaded} placeholder="Tape ta réponse..."
+                  disabled={!!selectedAnswer || !isReady} placeholder="Tape ta réponse..."
                   className="w-full bg-zinc-900/50 border-2 border-zinc-800 rounded-3xl px-8 py-6 text-xl font-bold outline-none focus:border-indigo-500 transition-all"
                   autoComplete="off"
                 />
                 <button 
                   onClick={() => handleChoice(userInput)}
-                  disabled={!userInput.trim() || !!selectedAnswer}
+                  disabled={!userInput.trim() || !!selectedAnswer || !isReady}
                   className="absolute right-4 top-1/2 -translate-y-1/2 p-4 bg-indigo-600 rounded-2xl hover:bg-indigo-500 transition-colors disabled:opacity-20"
                 >
                   <Send className="w-6 h-6" />

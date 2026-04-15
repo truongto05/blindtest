@@ -122,22 +122,32 @@ export default function GameBoard({ settings, onGameEnd, isMultiplayer, roomCode
   }, [isMultiplayer]);
 
   const loadNewRound = async () => {
-    setIsLoading(true); setSelectedAnswer(null); setUnlockedIndex(0);
-    setTimeLeft(settings.timeLimit); setUserInput(''); setSuggestions([]); setIsCorrect(null);
+    setIsLoading(true); 
+    setQuizData(null);
+    setSelectedAnswer(null); 
+    setUnlockedIndex(0);
+    setTimeLeft(settings.timeLimit); 
+    setUserInput(''); 
+    setSuggestions([]); 
+    setIsCorrect(null);
     try {
       const data = await fetchNextQuiz(settings.genre, settings.answerType, playedIds, settings.gameType, settings.customPlaylistUrl);
       setQuizData(data);
       setPlayedIds((prev: any[]) => [...prev, data.trackId]);
       setHistory((prev: QuizData[]) => prev.some(h => h.trackId === data.trackId) ? prev : [...prev, data]);
-    } catch (e) { console.error(e); } finally { setIsLoading(false); }
+    } catch (e) { 
+      console.error(e); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   // --- AUDIO & TIMER ---
   useEffect(() => {
-    if (isLoaded && !selectedAnswer && settings.mode === 'classic' && hasInteracted && quizData?.audioUrl) {
+    if (isLoaded && !selectedAnswer && settings.mode === 'classic' && hasInteracted && quizData?.audioUrl && !isLoading) {
         playFull();
     }
-  }, [isLoaded, selectedAnswer, hasInteracted, quizData]);
+  }, [isLoaded, selectedAnswer, hasInteracted, quizData, isLoading]);
 
   useEffect(() => {
     if (settings.mode === 'classic' && timeLeft > 0 && hasInteracted && !selectedAnswer && isReady) {

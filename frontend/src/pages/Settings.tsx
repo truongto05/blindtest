@@ -135,17 +135,32 @@ export default function Settings({ settings, setSettings, onSave, onBack, isMult
 
             {/* OPTIONS CINÉMA */}
             {!isMusicMode && (
-              <div>
-                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] block mb-3">Catégorie Cinéma</label>
-                <select 
-                  value={settings.gameType} 
-                  onChange={e => setSettings(s => ({ ...s, gameType: e.target.value as any }))}
-                  className="w-full bg-zinc-950 border border-zinc-800 p-4 rounded-xl font-bold outline-none focus:border-yellow-500"
-                >
-                  <option value="screen">🎬 Mix Films & Séries</option>
-                  <option value="movie">🎥 Films uniquement</option>
-                  <option value="series">📺 Séries uniquement</option>
-                </select>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] block mb-3">Catégorie Cinéma</label>
+                  <select 
+                    value={settings.gameType} 
+                    onChange={e => setSettings(s => ({ ...s, gameType: e.target.value as any }))}
+                    className="w-full bg-zinc-950 border border-zinc-800 p-4 rounded-xl font-bold outline-none focus:border-yellow-500"
+                  >
+                    <option value="screen">🎬 Mix Films & Séries</option>
+                    <option value="movie">🎥 Films uniquement</option>
+                    <option value="series">📺 Séries uniquement</option>
+                  </select>
+                </div>
+                
+                {/* NOUVEAU : Option pour l'affiche */}
+                <div>
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] block mb-3">Aide Visuelle</label>
+                  <select 
+                    value={settings.showPoster === false ? "false" : "true"} 
+                    onChange={e => setSettings(s => ({ ...s, showPoster: e.target.value === "true" }))}
+                    className="w-full bg-zinc-950 border border-zinc-800 p-4 rounded-xl font-bold outline-none focus:border-yellow-500"
+                  >
+                    <option value="true">🖼️ Afficher l'affiche (Floutée)</option>
+                    <option value="false">🙈 Masquer l'affiche (Expert)</option>
+                  </select>
+                </div>
               </div>
             )}
 

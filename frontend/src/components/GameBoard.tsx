@@ -249,7 +249,7 @@ export default function GameBoard({ settings, onGameEnd, isMultiplayer, roomCode
           {/* Affichage adaptatif (Affiche ou Disque) */}
           {['movie', 'series'].includes(quizData?.questionType || '') ? (
              <div className="relative w-48 h-64 rounded-xl overflow-hidden shadow-2xl z-10 border-2 border-zinc-800 bg-zinc-900">
-             {quizData?.coverUrl ? (
+             {quizData?.coverUrl && settings.showPoster !== false ? ( // <-- AJOUTE "&& settings.showPoster !== false" ICI
                <img 
                  src={quizData.coverUrl} 
                  alt="Affiche" 

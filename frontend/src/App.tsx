@@ -17,9 +17,9 @@ export type AnswerType = 'random' | 'both' | 'artist' | 'title';
 export type GenreType = 'all' | 'all_mix' | 'rap' | '80s' | 'rock' | 'electro' | 'pop' | 'francaise' | 'rnb' | 'metal' | 'reggae' | 'jazz' | 'rapus' | 'custom';
 export type GameType = 'music' | 'movie' | 'series' | 'screen';
 export type AnswerMode = 'choices' | 'input';
-export type Settings = { mode: GameMode; rounds: number; timeLimit: number; genre: GenreType; answerType: AnswerType; gameType: GameType; answerMode: AnswerMode; customPlaylistUrl: string; };
+export type Settings = { mode: GameMode; rounds: number; timeLimit: number; genre: GenreType; answerType: AnswerType; gameType: GameType; answerMode: AnswerMode; customPlaylistUrl: string; showPoster: boolean; };
 
-const DEFAULT_SETTINGS: Settings = { mode: 'classic', rounds: 5, timeLimit: 15, genre: 'all', answerType: 'random', gameType: 'music', answerMode: 'choices', customPlaylistUrl: '' };
+const DEFAULT_SETTINGS: Settings = { mode: 'classic', rounds: 5, timeLimit: 15, genre: 'all', answerType: 'random', gameType: 'music', answerMode: 'choices', customPlaylistUrl: '', showPoster: true };
 type GameState = 'home' | 'settings' | 'lobby' | 'playing' | 'end' | 'playlists';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';

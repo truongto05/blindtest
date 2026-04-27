@@ -74,7 +74,20 @@ export default function App() {
       setIsStarting(false); 
       setGameState('playing');
     });
-    return () => { socket.off('room_updated'); socket.off('new_round'); };
+    socket.on('room_error', (payload: { message?: string } | string) => {
+      setIsStarting(false);
+      showToast(typeof payload === 'string' ? payload : payload.message || 'Action impossible.', 'error');
+    });
+    socket.on('kicked_from_room', () => {
+      setIsStarting(false);
+      setPlayers([]);
+      setRoomCode('');
+      setIsMultiplayer(false);
+      setInitialQuizData(null);
+      setGameState('home');
+      showToast('Tu as ete expulse du salon.', 'error');
+    });
+    return () => { socket.off('room_updated'); socket.off('new_round'); socket.off('room_error'); socket.off('kicked_from_room'); };
   }, []);
 
   // --- LOGIQUE PLAYLISTS ---
@@ -133,6 +146,21 @@ export default function App() {
     } catch (e) { showToast("❌ Erreur de création", "error"); }
   };
 
+  const handleStartMultiplayer = () => {
+    const me = players.find((player) => player.id === socket.id);
+    if (!me?.isHost) {
+      showToast('Seul le chef du salon peut lancer la partie.', 'error');
+      return;
+    }
+
+    setIsStarting(true);
+    socket.emit('start_game', { roomCode, settings });
+  };
+
+  const handleKickPlayer = (playerId: string) => {
+    socket.emit('kick_player', { roomCode, playerId });
+  };
+
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans relative overflow-hidden">
       {/* Background FX */}
@@ -143,7 +171,7 @@ export default function App() {
       <div className="relative z-10">
         {gameState === 'home' && <Home onJoinMulti={(code) => { setIsMultiplayer(true); setRoomCode(code); setGameState('lobby'); }} onPlaySolo={() => { setIsMultiplayer(false); setGameState('settings'); }} onGoPlaylists={() => setGameState('playlists')} />}
 
-        {gameState === 'lobby' && <Lobby roomCode={roomCode} players={players} username={username} setUsername={setUsername} isStarting={isStarting} onBack={() => setGameState('home')} onSettings={() => setGameState('settings')} onStart={() => { setIsStarting(true); socket.emit('start_game', { roomCode, settings }); }} />}
+        {gameState === 'lobby' && <Lobby roomCode={roomCode} players={players} username={username} setUsername={setUsername} isStarting={isStarting} onBack={() => setGameState('home')} onSettings={() => setGameState('settings')} onStart={handleStartMultiplayer} onKick={handleKickPlayer} />}
 
         {gameState === 'settings' && <SettingsPage settings={settings} setSettings={setSettings} isMultiplayer={isMultiplayer} onBack={() => setGameState(isMultiplayer ? 'lobby' : 'home')} onSave={() => setGameState(isMultiplayer ? 'lobby' : 'playing')} />}
 

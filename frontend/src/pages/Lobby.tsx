@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, Settings as SettingsIcon, Play, ArrowLeft, Crown } from 'lucide-react';
+import { Users, Settings as SettingsIcon, Play, ArrowLeft, Crown, UserX } from 'lucide-react';
 import { socket } from '../services/socketService';
 
 type LobbyProps = {
@@ -9,13 +9,16 @@ type LobbyProps = {
   setUsername: (val: string) => void;
   isStarting: boolean;
   onStart: () => void;
+  onKick: (playerId: string) => void;
   onSettings: () => void;
   onBack: () => void;
 };
 
-export default function Lobby({ roomCode, players, username, setUsername, isStarting, onStart, onSettings, onBack }: LobbyProps) {
+export default function Lobby({ roomCode, players, username, setUsername, isStarting, onStart, onKick, onSettings, onBack }: LobbyProps) {
   // On vérifie si l'utilisateur local est déjà dans la liste
   const me = players.find(p => p.id === socket.id);
+  const hasExplicitHost = players.some((p) => p.isHost);
+  const isHost = Boolean(me?.isHost || (!hasExplicitHost && players[0]?.id === socket.id));
 
   const handleJoin = () => {
     if (!username.trim()) return;
@@ -77,32 +80,49 @@ export default function Lobby({ roomCode, players, username, setUsername, isStar
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-16">
-              {players.map((p, i) => (
-                <div key={p.id || i} className={`group p-5 rounded-3xl border transition-all flex items-center gap-4 ${
-                  p.id === socket.id ? 'bg-indigo-500/10 border-indigo-500/50 shadow-lg shadow-indigo-500/5' : 'bg-zinc-900/30 border-zinc-800 hover:border-zinc-700'
-                }`}>
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg ${
-                    p.id === socket.id ? 'bg-indigo-500 text-white' : 'bg-zinc-800 text-zinc-500'
+              {players.map((p, i) => {
+                const playerIsMe = p.id === socket.id;
+                const playerIsHost = Boolean(p.isHost || (!hasExplicitHost && i === 0));
+
+                return (
+                  <div key={p.id || i} className={`group p-5 rounded-3xl border transition-all flex items-center gap-4 ${
+                    playerIsMe ? 'bg-indigo-500/10 border-indigo-500/50 shadow-lg shadow-indigo-500/5' : 'bg-zinc-900/30 border-zinc-800 hover:border-zinc-700'
                   }`}>
-                    {p.username?.charAt(0).toUpperCase()}
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg ${
+                      playerIsMe ? 'bg-indigo-500 text-white' : 'bg-zinc-800 text-zinc-500'
+                    }`}>
+                      {p.username?.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`font-bold text-lg truncate ${playerIsMe ? 'text-white' : 'text-zinc-300'}`}>
+                        {p.username}
+                      </p>
+                      {playerIsMe && <p className="text-[10px] font-black uppercase text-indigo-400 tracking-widest">C'est toi</p>}
+                    </div>
+                    {playerIsHost && (
+                      <span title="Chef de salon" className="shrink-0">
+                         <Crown className="w-5 h-5 text-yellow-500 drop-shadow-[0_0_8px_rgba(234,179,8,0.4)]" />
+                      </span>
+                    )}
+                    {isHost && !playerIsMe && !playerIsHost && (
+                      <button
+                        type="button"
+                        onClick={() => onKick(p.id)}
+                        title={`Expulser ${p.username}`}
+                        className="w-10 h-10 rounded-xl border border-red-500/20 bg-red-500/10 text-red-300 sm:opacity-0 sm:group-hover:opacity-100 hover:bg-red-500 hover:text-white transition-all flex items-center justify-center shrink-0"
+                      >
+                        <UserX className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`font-bold text-lg truncate ${p.id === socket.id ? 'text-white' : 'text-zinc-300'}`}>
-                      {p.username}
-                    </p>
-                    {p.id === socket.id && <p className="text-[10px] font-black uppercase text-indigo-400 tracking-widest">C'est toi</p>}
-                  </div>
-                  {i === 0 && (
-                    <span title="Chef de salon">
-                       <Crown className="w-5 h-5 text-yellow-500 drop-shadow-[0_0_8px_rgba(234,179,8,0.4)]" />
-                    </span>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Actions du bas */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+              {isHost ? (
+                <>
               <button 
                 onClick={onSettings} 
                 className="w-full sm:w-auto bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 hover:border-zinc-700 px-10 py-5 rounded-2xl font-black flex items-center justify-center gap-3 transition-all"
@@ -116,6 +136,12 @@ export default function Lobby({ roomCode, players, username, setUsername, isStar
               >
                 <Play className="w-6 h-6 fill-black" /> {isStarting ? 'LANCEMENT...' : 'DEMARRER'}
               </button>
+                </>
+              ) : (
+                <div className="w-full sm:w-auto bg-zinc-900 border border-zinc-800 px-10 py-5 rounded-2xl font-black text-zinc-500 text-center">
+                  EN ATTENTE DU CHEF
+                </div>
+              )}
             </div>
           </div>
         )}

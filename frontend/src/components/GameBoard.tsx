@@ -105,14 +105,17 @@ export default function GameBoard({ settings, onGameEnd, isMultiplayer, roomCode
 
   useEffect(() => {
     if (isMultiplayer) {
-      socket.on('new_round', (data: any) => {
+      const handleNewRound = (data: any) => {
         setQuizData(data); setCurrentRound(data.currentRound); setIsLoading(false);
         setSelectedAnswer(null); setUnlockedIndex(0); setTimeLeft(settings.timeLimit);
         setUserInput(''); setSuggestions([]); setIsCorrect(null);
         setHistory((prev: QuizData[]) => prev.some(h => h.trackId === data.trackId) ? prev : [...prev, data]);
-      });
-      socket.on('game_over', () => { onGameEnd(scoreRef.current, historyRef.current); });
-      return () => { socket.off('new_round'); socket.off('game_over'); };
+      };
+      const handleGameOver = () => { onGameEnd(scoreRef.current, historyRef.current); };
+
+      socket.on('new_round', handleNewRound);
+      socket.on('game_over', handleGameOver);
+      return () => { socket.off('new_round', handleNewRound); socket.off('game_over', handleGameOver); };
     } else {
         if (!initialData && currentRound === 1 && !quizData && !hasStartedFirstLoad.current) {
             hasStartedFirstLoad.current = true;

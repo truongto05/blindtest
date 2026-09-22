@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: pulse
+      POSTGRES_USER: pulse
+      POSTGRES_PASSWORD: pulse
+    volumes:
+      - pulse-app-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U pulse -d pulse"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+  migrate:
+    build:
+      context: ./backend
+      target: build
+    environment:
+      DATABASE_URL: postgresql://pulse:pulse@postgres:5432/pulse
+      DIRECT_URL: postgresql://pulse:pulse@postgres:5432/pulse
+    command: [npm, run, db:migrate]
+    depends_on:
+      postgres:
+        condition: service_healthy
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://pulse:pulse@postgres:5432/pulse
+      ALLOWED_ORIGINS: http://localhost:8080
+      TRUST_PROXY: "true"
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - backend
+volumes:
+  pulse-app-postgres:

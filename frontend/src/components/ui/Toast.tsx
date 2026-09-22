@@ -1,16 +1,23 @@
-import React from 'react';
+import { AlertCircle, CheckCircle2 } from "lucide-react";
 
 type ToastProps = {
-  toast: { message: string; type: 'success' | 'error' } | null;
+  toast: { message: string; type: "success" | "error" } | null;
 };
 
 export default function Toast({ toast }: ToastProps) {
   if (!toast) return null;
   return (
-    <div className={`fixed top-8 left-1/2 transform -translate-x-1/2 px-8 py-4 rounded-full shadow-[0_10px_40px_rgba(0,0,0,0.5)] font-bold text-sm z-[100] flex items-center justify-center transition-all animate-in fade-in slide-in-from-top-4 backdrop-blur-md ${
-      toast.type === 'success' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' : 'bg-red-500/20 text-red-400 border border-red-500/50'
-    }`}>
-      {toast.message}
+    <div
+      role={toast.type === "error" ? "alert" : "status"}
+      aria-live={toast.type === "error" ? "assertive" : "polite"}
+      className={`pointer-events-none fixed left-1/2 top-[max(1rem,env(safe-area-inset-top))] z-[100] flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center gap-3 rounded-md border px-5 py-4 ${toast.type === "success" ? "border-emerald-400/30 bg-emerald-950 text-emerald-200" : "border-rose-400/30 bg-rose-950 text-rose-200"}`}
+    >
+      {toast.type === "success" ? (
+        <CheckCircle2 className="shrink-0" size={20} />
+      ) : (
+        <AlertCircle className="shrink-0" size={20} />
+      )}
+      <span className="font-semibold">{toast.message}</span>
     </div>
   );
 }

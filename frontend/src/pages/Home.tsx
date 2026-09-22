@@ -1,62 +1,306 @@
-import React, { useState } from 'react';
-import { Play, Users, Headphones, ListMusic } from 'lucide-react';
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { ArrowRight, Library, Loader2, Users } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import Brand from "../components/Brand";
+import PulseSignal from "../components/PulseSignal";
+import SelectionShelf from "../components/SelectionShelf";
+import type { HomeSelectionId } from "../domain/selections";
+import type { Settings } from "../types/game";
 
-// 👇 NOUVEAU : On définit exactement ce qu'attend le composant Home
-type HomeProps = {
-  onJoinMulti: (code: string, isCreating?: boolean) => void;
-  onPlaySolo: () => void;
-  onGoPlaylists: () => void;
+type Props = {
+  accountName?: string;
+  username: string;
+  setUsername: (value: string) => void;
+  onCreate: (name: string) => void;
+  onJoin: (code: string, name: string) => void;
+  onSolo: () => void;
+  onPlaylists: () => void;
+  settings: Settings;
+  onSelect: (id: HomeSelectionId) => void;
+  onQuickPlay: () => void;
+  pending?: boolean;
+  canJoin?: boolean;
 };
 
-// 👇 On applique le type "HomeProps" à nos paramètres
-export default function Home({ onJoinMulti, onPlaySolo, onGoPlaylists }: HomeProps) {
-  const [code, setCode] = useState('');
-
+export default function Home({
+  accountName,
+  username,
+  setUsername,
+  onCreate,
+  onJoin,
+  onSolo,
+  onPlaylists,
+  settings,
+  onSelect,
+  onQuickPlay,
+  pending = false,
+  canJoin = true,
+}: Props) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sharedCode = searchParams.get("room")?.trim().toUpperCase() || "";
+  const invitationCode = /^[A-Z0-9]{6}$/.test(sharedCode) ? sharedCode : "";
+  const [manualCode, setManualCode] = useState("");
+  const code = invitationCode || manualCode;
+  const usernameInput = useRef<HTMLInputElement>(null);
+  const previousInvitation = useRef(invitationCode);
+  useEffect(() => {
+    if (previousInvitation.current && !invitationCode)
+      usernameInput.current?.focus();
+    previousInvitation.current = invitationCode;
+  }, [invitationCode]);
+  const validName =
+    username.trim().length >= 2 &&
+    username.trim().length <= 24 &&
+    /^[\p{L}\p{N} _.-]+$/u.test(username.trim());
+  const validCode = /^[A-Z0-9]{6}$/.test(code);
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (validName && validCode && canJoin && !pending) onJoin(code, username);
+  };
+  const leaveInvitation = () => {
+    if (pending) return;
+    setManualCode("");
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("room");
+      return next;
+    });
+  };
+  const nicknameField = (
+    <>
+      <label className="label" htmlFor="username">
+        Ton pseudo
+      </label>
+      <input
+        ref={usernameInput}
+        id="username"
+        className="field"
+        value={username}
+        maxLength={24}
+        autoComplete="nickname"
+        placeholder="Ex. Nina"
+        disabled={pending}
+        aria-describedby="username-hint"
+        aria-invalid={username.length > 0 && !validName}
+        onChange={(event) => setUsername(event.target.value)}
+      />
+      <p
+        id="username-hint"
+        className="mt-2 text-xs leading-relaxed text-zinc-400"
+      >
+        Pour les salons : 2 à 24 caractères, lettres, chiffres, espaces, tirets,
+        points ou underscores.
+      </p>
+    </>
+  );
+  const joinFeedback = pending ? (
+    <p className="mt-3 text-sm text-zinc-300" role="status">
+      Connexion au salon…
+    </p>
+  ) : !canJoin ? (
+    <p className="mt-3 text-sm text-amber-200" role="status">
+      La connexion au serveur doit être rétablie pour entrer.
+    </p>
+  ) : null;
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
-      <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/20 blur-[120px] rounded-full pointer-events-none"></div>
-      <div className="absolute bottom-[-20%] right-[-10%] w-[400px] h-[400px] bg-rose-600/10 blur-[120px] rounded-full pointer-events-none"></div>
-
-      <div className="z-10 w-full max-w-md flex flex-col items-center">
-        <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mb-8 shadow-[0_0_40px_rgba(99,102,241,0.3)]">
-          <Headphones className="text-white w-8 h-8" />
+    <main id="main-content" className="page py-5 sm:py-8">
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-white/15 pb-5 sm:mb-8">
+        <div className="flex items-center gap-5">
+          <Brand />
+          <span className="hidden border-l border-white/15 pl-5 text-xs font-semibold uppercase tracking-[.14em] text-zinc-400 sm:block">
+            Le blind test
+          </span>
         </div>
-        
-        <h1 className="text-5xl font-extrabold tracking-tight mb-2 text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-400">Blindtest</h1>
-        <p className="text-zinc-500 mb-10 font-medium">L'expérience musicale ultime.</p>
-
-        {/* Rejoindre */}
-        <div className="w-full bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-3xl p-6 mb-6 shadow-2xl">
-          <label className="block text-xs font-bold uppercase tracking-wider text-zinc-500 mb-3">Rejoindre un salon</label>
-          <div className="flex gap-3">
-            <input 
-              type="text" 
-              placeholder="Code (ex: A1B2)" 
-              value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-              className="flex-1 bg-zinc-950 border border-zinc-800 focus:border-indigo-500 rounded-xl px-4 py-3 outline-none font-medium text-lg text-white uppercase transition-all"
-            />
-            <button onClick={() => onJoinMulti(code)} className="bg-white text-black hover:bg-zinc-200 px-6 rounded-xl font-bold transition-colors shadow-lg">Go</button>
+        <nav
+          className="flex flex-wrap items-center gap-1"
+          aria-label="Navigation principale"
+        >
+          <Link className="btn-ghost px-3 text-sm" to="/amis">
+            Amis
+          </Link>
+          <Link className="btn-ghost px-3 text-sm" to="/compte">
+            {accountName ? "Mon compte" : "Connexion"}
+          </Link>
+          <button
+            className="btn-ghost px-3"
+            onClick={onPlaylists}
+            disabled={pending}
+          >
+            <Library size={19} aria-hidden="true" /> Bibliothèque
+          </button>
+        </nav>
+      </header>
+      {invitationCode ? (
+        <section
+          className="mx-auto w-full max-w-xl pb-9"
+          aria-labelledby="invitation-title"
+        >
+          <p className="eyebrow mb-3">Invitation</p>
+          <h1
+            id="invitation-title"
+            className="mb-6 text-3xl font-bold tracking-tight sm:text-4xl"
+          >
+            Rejoins la partie.
+          </h1>
+          <div className="play-desk">
+            <div className="mb-5 border-b border-white/15 pb-5">
+              <label className="label" htmlFor="room-code">
+                Code du salon
+              </label>
+              <input
+                id="room-code"
+                className="w-full min-w-0 bg-transparent font-mono text-[clamp(1rem,7vw,1.5rem)] font-semibold tracking-[.14em] text-beat-300"
+                value={invitationCode}
+                readOnly
+                disabled={pending}
+                tabIndex={-1}
+                aria-describedby="invitation-code-hint"
+              />
+              <p
+                id="invitation-code-hint"
+                className="mt-2 text-sm text-zinc-400"
+              >
+                Le code est déjà renseigné. Il ne manque que ton pseudo.
+              </p>
+            </div>
+            <form onSubmit={submit} aria-busy={pending}>
+              {nicknameField}
+              <button
+                className="btn-primary mt-5 min-h-14 w-full"
+                disabled={!validName || !canJoin || pending}
+              >
+                {pending ? (
+                  <Loader2
+                    size={19}
+                    className="animate-spin"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <ArrowRight size={19} aria-hidden="true" />
+                )}{" "}
+                Rejoindre
+              </button>
+              {joinFeedback}
+            </form>
           </div>
-        </div>
-
-        {/* Créer */}
-        <div className="grid grid-cols-2 gap-4 w-full mb-6">
-          <button onClick={() => onJoinMulti(Math.random().toString(36).substring(2, 8).toUpperCase(), true)} className="group flex flex-col items-center justify-center bg-zinc-900/30 border border-zinc-800 hover:border-indigo-500/50 p-6 rounded-3xl transition-all hover:bg-zinc-900/80">
-            <Users className="w-6 h-6 text-indigo-400 mb-3 group-hover:scale-110 transition-transform" />
-            <span className="font-semibold text-sm">Créer une Room</span>
+          <button
+            className="btn-ghost mt-5 px-0"
+            disabled={pending}
+            onClick={leaveInvitation}
+          >
+            Choisir une autre partie
           </button>
-          <button onClick={onPlaySolo} className="group flex flex-col items-center justify-center bg-zinc-900/30 border border-zinc-800 hover:border-emerald-500/50 p-6 rounded-3xl transition-all hover:bg-zinc-900/80">
-            <Play className="w-6 h-6 text-emerald-400 mb-3 group-hover:scale-110 transition-transform" />
-            <span className="font-semibold text-sm">Jouer Solo</span>
-          </button>
-        </div>
-
-        {/* Playlists */}
-        <button onClick={onGoPlaylists} className="w-full flex items-center justify-center gap-2 bg-zinc-900/30 border border-zinc-800 hover:border-pink-500/50 p-4 rounded-2xl transition-all hover:bg-zinc-900/80 text-pink-400 font-semibold text-sm">
-          <ListMusic className="w-5 h-5" /> Mes Playlists
-        </button>
-      </div>
-    </div>
+        </section>
+      ) : (
+        <>
+          <div className="home-intro">
+            <p className="eyebrow mb-3 flex items-center gap-3">
+              <PulseSignal />
+              Musique, films & séries
+            </p>
+            <h1 className="home-headline">
+              Reconnais le son.
+              <br />
+              <span className="text-beat-400">Avant les autres.</span>
+            </h1>
+            <p className="mt-3 max-w-xl text-sm leading-relaxed text-zinc-400 sm:text-base">
+              Des hits, des génériques, des refrains sur le bout de la langue.
+              Choisis ta sélection et entre dans la partie.
+            </p>
+            <button
+              className="btn-ghost mt-2 px-0 text-sm lg:hidden"
+              disabled={pending}
+              onClick={() => usernameInput.current?.focus()}
+            >
+              <Users size={17} aria-hidden="true" /> Jouer entre amis{" "}
+              <span aria-hidden="true">↓</span>
+            </button>
+          </div>
+          <div className="home-game-grid">
+            <SelectionShelf
+              settings={settings}
+              onSelect={onSelect}
+              onPlay={onQuickPlay}
+              onCustomize={onSolo}
+              pending={pending}
+              connected={canJoin}
+            />
+            <aside
+              className="play-desk self-start"
+              aria-labelledby="friends-title"
+            >
+              <div className="mb-6 flex items-start justify-between gap-3">
+                <div>
+                  <h2
+                    id="friends-title"
+                    className="text-xl font-bold tracking-tight"
+                  >
+                    Place aux amis.
+                  </h2>
+                  <p className="mt-1 text-sm text-zinc-400">
+                    Crée ton salon ou rejoins le leur.
+                  </p>
+                </div>
+              </div>
+              {nicknameField}
+              <div className="my-5 grid gap-2">
+                <button
+                  className="btn-primary min-h-14 justify-between"
+                  disabled={!validName || pending}
+                  onClick={() => onCreate(username)}
+                >
+                  <span className="flex items-center gap-3">
+                    <Users size={19} aria-hidden="true" /> Créer un salon
+                  </span>
+                  <ArrowRight size={19} aria-hidden="true" />
+                </button>
+              </div>
+              <form
+                onSubmit={submit}
+                className="border-t border-white/15 pt-5"
+                aria-busy={pending}
+              >
+                <label className="label" htmlFor="room-code">
+                  Code du salon
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <div className="flex-1">
+                    <input
+                      id="room-code"
+                      className="field font-mono uppercase tracking-[.18em]"
+                      value={code}
+                      maxLength={6}
+                      autoCapitalize="characters"
+                      autoComplete="off"
+                      spellCheck={false}
+                      disabled={pending}
+                      aria-describedby="room-code-hint"
+                      placeholder="ABC123"
+                      onChange={(e) =>
+                        setManualCode(
+                          e.target.value
+                            .toUpperCase()
+                            .replace(/[^A-Z0-9]/g, ""),
+                        )
+                      }
+                    />
+                  </div>
+                  <button
+                    className="btn-secondary sm:px-4"
+                    disabled={!validName || !validCode || !canJoin || pending}
+                  >
+                    Rejoindre <ArrowRight size={18} aria-hidden="true" />
+                  </button>
+                </div>
+                <p id="room-code-hint" className="mt-2 text-xs text-zinc-400">
+                  Les 6 caractères partagés par ton hôte.
+                </p>
+                {joinFeedback}
+              </form>
+            </aside>
+          </div>
+        </>
+      )}
+    </main>
   );
 }

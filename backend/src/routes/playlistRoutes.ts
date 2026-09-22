@@ -1,98 +1,163 @@
-import { Router, Request, Response } from 'express';
-import { prisma } from '../lib/prisma';
+import { Router, type ErrorRequestHandler, type Request } from "express";
+import { Prisma } from "@prisma/client";
+import { z } from "zod";
+import { DeezerTrackError } from "../services/deezerTrackService";
+import { AuthError, accessTokenFromRequest } from "../services/authService";
+import { protectLibraryOwner } from "../services/accountService";
+import {
+  addPlaylistTrack,
+  copySharedPlaylist,
+  createPlaylist,
+  deletePlaylist,
+  getOwnedPlaylist,
+  getSharedPlaylist,
+  listOwnedPlaylists,
+  listPublicPlaylists,
+  ownerPlaylistDto,
+  PlaylistError,
+  publicPlaylistDto,
+  removePlaylistTrack,
+  renamePlaylist,
+  setPlaylistVisibility,
+} from "../services/playlistService";
+import {
+  addTrackBodySchema,
+  catalogQuerySchema,
+  copyBodySchema,
+  ownerQuerySchema,
+  playlistBodySchema,
+  playlistIdSchema,
+  shareIdSchema,
+  trackIdSchema,
+  visibilityBodySchema,
+} from "../validation/playlists";
 
 const router = Router();
 
-/**
- * RÉCUPÉRER LES PLAYLISTS
- * Route: GET /api/playlists?ownerId=...
- */
-router.get('/', async (req: Request, res: Response) => {
-  try {
-    const ownerId = req.query.ownerId as string;
+async function readOwner(req: Request) {
+  // Keep the former query contract for existing clients; the app uses a header
+  // so library access keys do not appear in request URLs and proxy access logs.
+  const ownerId = ownerQuerySchema.parse({
+    ...req.query,
+    ownerId: req.get("X-Library-Id") ?? req.query.ownerId,
+  }).ownerId;
+  return protectLibraryOwner(ownerId, accessTokenFromRequest(req));
+}
 
-    if (!ownerId) {
-      return res.json([]);
-    }
-
-    const playlists = await prisma.playlist.findMany({
-      where: { ownerId: ownerId },
-      include: { tracks: true },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    res.json(playlists);
-  } catch (error) {
-    console.error("Erreur GET Playlists:", error);
-    res.status(500).json({ error: "Erreur lors de la récupération des playlists" });
-  }
+router.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
 });
 
-/**
- * CRÉER UNE PLAYLIST
- * Route: POST /api/playlists
- */
-router.post('/', async (req: Request, res: Response) => {
-  try {
-    const { name, ownerId } = req.body;
-
-    if (!name || !ownerId) {
-      return res.status(400).json({ error: "Nom et ownerId requis" });
-    }
-
-    const playlist = await prisma.playlist.create({
-      data: { name, ownerId }
-    });
-
-    res.json(playlist);
-  } catch (error) {
-    console.error("Erreur POST Playlist:", error);
-    res.status(500).json({ error: "Erreur lors de la création de la playlist" });
-  }
+router.get("/public", async (req, res) => {
+  const { page, limit } = catalogQuerySchema.parse(req.query);
+  res.json(await listPublicPlaylists(page, limit));
 });
 
-/**
- * AJOUTER UN TITRE À UNE PLAYLIST
- * Route: POST /api/playlists/:id/tracks
- */
-router.post('/:id/tracks', async (req: Request, res: Response) => {
-  try {
-    // On force l'id en string pour corriger l'erreur TS2322
-    const playlistId = String(req.params.id);
-    const { deezerId, title, artist, coverUrl, previewUrl } = req.body;
-
-    if (!deezerId) {
-      return res.status(400).json({ error: "ID Deezer requis" });
-    }
-
-    // 1. On crée le titre s'il n'existe pas, sinon on ne fait rien (upsert)
-    await prisma.track.upsert({
-      where: { deezerId: String(deezerId) },
-      update: {}, 
-      create: { 
-        deezerId: String(deezerId), 
-        title: title || "Titre inconnu", 
-        artist: artist || "Artiste inconnu", 
-        coverUrl: coverUrl || "", 
-        previewUrl: previewUrl || "" 
-      }
-    });
-
-    // 2. On lie le titre à la playlist
-    await prisma.playlist.update({
-      where: { id: playlistId }, // Ligne corrigée
-      data: { 
-        tracks: { 
-          connect: { deezerId: String(deezerId) } 
-        } 
-      }
-    });
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error("Erreur ajout musique:", error);
-    res.status(500).json({ error: "Erreur lors de l'ajout du titre à la playlist" });
-  }
+router.get("/share/:shareId", async (req, res) => {
+  const shareId = shareIdSchema.parse(req.params.shareId);
+  res.json(publicPlaylistDto(await getSharedPlaylist(shareId)));
 });
 
+router.post("/share/:shareId/copy", async (req, res) => {
+  const shareId = shareIdSchema.parse(req.params.shareId);
+  const { ownerId } = copyBodySchema.parse(req.body);
+  await protectLibraryOwner(ownerId, accessTokenFromRequest(req));
+  res.status(201).json(await copySharedPlaylist(shareId, ownerId));
+});
+
+router.get("/", async (req, res) => {
+  const ownerId = await readOwner(req);
+  res.json(await listOwnedPlaylists(ownerId));
+});
+
+router.post("/", async (req, res) => {
+  const { ownerId, name } = playlistBodySchema.parse(req.body);
+  await protectLibraryOwner(ownerId, accessTokenFromRequest(req));
+  res.status(201).json(await createPlaylist(ownerId, name));
+});
+
+router.get("/:id", async (req, res) => {
+  const id = playlistIdSchema.parse(req.params.id);
+  const ownerId = await readOwner(req);
+  res.json(ownerPlaylistDto(await getOwnedPlaylist(id, ownerId)));
+});
+
+router.patch("/:id", async (req, res) => {
+  const id = playlistIdSchema.parse(req.params.id);
+  const { ownerId, name } = playlistBodySchema.parse(req.body);
+  await protectLibraryOwner(ownerId, accessTokenFromRequest(req));
+  res.json(await renamePlaylist(id, ownerId, name));
+});
+
+router.delete("/:id", async (req, res) => {
+  const id = playlistIdSchema.parse(req.params.id);
+  const ownerId = await readOwner(req);
+  await deletePlaylist(id, ownerId);
+  res.status(204).send();
+});
+
+router.patch("/:id/visibility", async (req, res) => {
+  const id = playlistIdSchema.parse(req.params.id);
+  const { ownerId, visibility } = visibilityBodySchema.parse(req.body);
+  await protectLibraryOwner(ownerId, accessTokenFromRequest(req));
+  res.json(await setPlaylistVisibility(id, ownerId, visibility));
+});
+
+router.post("/:id/tracks", async (req, res) => {
+  const id = playlistIdSchema.parse(req.params.id);
+  const { ownerId, ...track } = addTrackBodySchema.parse(req.body);
+  await protectLibraryOwner(ownerId, accessTokenFromRequest(req));
+  await addPlaylistTrack(id, ownerId, track);
+  res.status(201).json({ success: true });
+});
+
+router.delete("/:id/tracks/:trackId", async (req, res) => {
+  const id = playlistIdSchema.parse(req.params.id);
+  const trackId = trackIdSchema.parse(req.params.trackId);
+  const ownerId = await readOwner(req);
+  await removePlaylistTrack(id, ownerId, trackId);
+  res.status(204).send();
+});
+
+const playlistErrorHandler: ErrorRequestHandler = (
+  error: unknown,
+  _req,
+  res,
+  _next,
+) => {
+  if (error instanceof z.ZodError) {
+    res.status(400).json({
+      error:
+        "Les informations de la playlist sont invalides. Vérifie les champs renseignés.",
+    });
+  } else if (
+    error instanceof PlaylistError ||
+    error instanceof DeezerTrackError ||
+    error instanceof AuthError
+  ) {
+    res.status(error.status).json({ error: error.message });
+  } else if (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2025"
+  ) {
+    res
+      .status(404)
+      .json({ error: "Playlist introuvable dans cette bibliothèque." });
+  } else if (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    ["P2002", "P2003", "P2034"].includes(error.code)
+  ) {
+    res.status(409).json({
+      error: "La playlist a changé entre-temps. Actualise la page et réessaie.",
+    });
+  } else {
+    res.status(503).json({
+      error:
+        "Bibliothèque temporairement indisponible. Réessaie dans un instant.",
+    });
+  }
+};
+
+router.use(playlistErrorHandler);
 export default router;

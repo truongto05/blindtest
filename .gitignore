@@ -1,31 +1,19 @@
-# =========================
-# Dependencies
-# =========================
 node_modules/
 
-# =========================
-# Environment variables
-# =========================
 .env
 .env.*
 !.env.example
 
-# =========================
-# Build outputs
-# =========================
 dist/
 build/
 .vite/
 coverage/
+test-results/
+playwright-report/
+.audit-*.png
 
-# =========================
-# TypeScript
-# =========================
 *.tsbuildinfo
 
-# =========================
-# Logs
-# =========================
 *.log
 logs/
 npm-debug.log*
@@ -33,37 +21,30 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# =========================
-# Cache / temp
-# =========================
 .cache/
 .parcel-cache/
 .eslintcache
 tmp/
 temp/
 
-# =========================
-# Editors / IDE
-# =========================
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# =========================
-# OS files
-# =========================
 .DS_Store
 Thumbs.db
 
-# =========================
-# Runtime files
-# =========================
 *.pid
 *.pid.lock
 *.seed
 
-# =========================
-# Local-only files
-# =========================
 *.local
+
+# Local operational notes, database exports and signing material.
+*.dump
+*.backup
+*.pem
+*.key
+*.p12
+.vercel/

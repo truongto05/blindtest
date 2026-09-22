@@ -1,5 +1,28 @@
 {
-  "dependencies": {
-    "dotenv": "^17.3.1"
+  "name": "pulse-blindtest",
+  "private": true,
+  "description": "Pulse — blind test temps réel, playlists et amis",
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:repository": "node scripts/check-repository.cjs",
+    "db:check": "node backend/scripts/db-check.cjs",
+    "dev": "concurrently --kill-others --names API,WEB --prefix-colors magenta,cyan \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix backend run dev",
+    "db:migrate": "npm --prefix backend run db:migrate",
+    "check": "npm run check:repository && npm run lint && npm run typecheck && npm test && npm run build",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "test": "npm --prefix backend test && npm --prefix frontend test && npm run test:deployment",
+    "test:deployment": "node --test frontend/scripts/deployment.test.cjs backend/scripts/delete-account.test.cjs",
+    "lint": "npm --prefix backend run lint && npm --prefix frontend run lint",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5",
+    "prettier": "^3.9.6"
   }
 }

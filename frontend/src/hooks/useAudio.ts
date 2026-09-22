@@ -1,106 +1,133 @@
-import { useEffect, useRef, useState } from 'react';
-import { Howl } from 'howler';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Howl } from "howler";
+import { storage } from "../services/storage";
 
-export const useAudio = (audioUrl: string | null) => {
-  const soundRef = useRef<Howl | null>(null);
-  const stopTimeoutRef = useRef<number | null>(null);
-
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-
-  const clearStopTimeout = () => {
-    if (stopTimeoutRef.current !== null) {
-      window.clearTimeout(stopTimeoutRef.current);
-      stopTimeoutRef.current = null;
-    }
-  };
-
+const VOLUME_KEY = "pulse_volume";
+const MUTED_KEY = "pulse_muted";
+export function useAudio(audioUrl: string | null) {
+  const sound = useRef<Howl | null>(null);
+  const timeout = useRef<number>();
+  const requestedDuration = useRef<number>();
+  const generation = useRef(0);
+  const [status, setStatus] = useState<
+    "idle" | "loading" | "ready" | "playing" | "blocked" | "error"
+  >("idle");
+  const [volume, setVolumeState] = useState(() => {
+    const saved = Number(storage.get(VOLUME_KEY) ?? 0.8);
+    return Number.isFinite(saved) ? Math.max(0, Math.min(1, saved)) : 0.8;
+  });
+  const [muted, setMutedState] = useState(
+    () => storage.get(MUTED_KEY) === "true",
+  );
+  const [retryKey, setRetryKey] = useState(0);
+  const cleanup = useCallback(() => {
+    if (timeout.current) window.clearTimeout(timeout.current);
+    timeout.current = undefined;
+    sound.current?.unload();
+    sound.current = null;
+  }, []);
   useEffect(() => {
-    clearStopTimeout();
-    setIsLoaded(false);
-    setIsPlaying(false);
-
+    cleanup();
+    const current = ++generation.current;
     if (!audioUrl) {
-      if (soundRef.current) {
-        soundRef.current.unload();
-        soundRef.current = null;
-      }
+      setStatus("idle");
       return;
     }
-
-    if (soundRef.current) {
-      soundRef.current.unload();
-      soundRef.current = null;
-    }
-
-    soundRef.current = new Howl({
+    setStatus("loading");
+    const loadTimer = window.setTimeout(() => {
+      if (generation.current === current) {
+        generation.current += 1;
+        sound.current?.unload();
+        setStatus("error");
+      }
+    }, 10_000);
+    sound.current = new Howl({
       src: [audioUrl],
-      // On remet html5 à TRUE. C'est indispensable pour contourner les blocages 
-      // de sécurité (CORS) de Deezer sur les navigateurs comme Safari ou Edge.
-      html5: true, 
+      html5: true,
       preload: true,
-      onload: () => setIsLoaded(true),
-      onplay: () => setIsPlaying(true),
-      onend: () => setIsPlaying(false),
-      onstop: () => setIsPlaying(false),
-      onloaderror: (_, error) => {
-        console.error('Erreur de chargement audio:', error);
-        setIsLoaded(false);
-        setIsPlaying(false);
+      volume: muted ? 0 : volume,
+      onload: () => {
+        window.clearTimeout(loadTimer);
+        if (generation.current === current) setStatus("ready");
       },
-      onplayerror: (_, error) => {
-        console.error('Erreur de lecture audio:', error);
-        setIsPlaying(false);
-        if (soundRef.current) {
-          soundRef.current.once('unlock', () => {
-            soundRef.current?.play();
-          });
+      onplay: () => {
+        if (generation.current !== current) return;
+        setStatus("playing");
+        if (timeout.current) window.clearTimeout(timeout.current);
+        if (requestedDuration.current) {
+          timeout.current = window.setTimeout(() => {
+            if (generation.current === current) sound.current?.stop();
+          }, requestedDuration.current * 1000);
         }
-      }
+      },
+      onpause: () => {
+        if (generation.current === current) setStatus("ready");
+      },
+      onstop: () => {
+        if (generation.current === current) setStatus("ready");
+      },
+      onend: () => {
+        if (timeout.current) window.clearTimeout(timeout.current);
+        if (generation.current === current) setStatus("ready");
+      },
+      onloaderror: () => {
+        window.clearTimeout(loadTimer);
+        if (generation.current === current) setStatus("error");
+      },
+      onplayerror: () => {
+        if (generation.current === current) setStatus("blocked");
+      },
     });
-
     return () => {
-      clearStopTimeout();
-      if (soundRef.current) {
-        soundRef.current.unload();
-        soundRef.current = null;
-      }
+      generation.current += 1;
+      window.clearTimeout(loadTimer);
+      cleanup();
     };
-  }, [audioUrl]);
-
-  const playSegment = (duration: number) => {
-    if (!soundRef.current || !isLoaded) return;
-    clearStopTimeout();
-    soundRef.current.stop();
-    soundRef.current.seek(0);
-    soundRef.current.play();
-    setIsPlaying(true);
-
-    stopTimeoutRef.current = window.setTimeout(() => {
-      if (soundRef.current?.playing()) {
-        soundRef.current.stop();
-      }
-      setIsPlaying(false);
-      stopTimeoutRef.current = null;
-    }, duration * 1000);
-  };
-
-  const playFull = () => {
-    if (!soundRef.current || !isLoaded) return;
-    clearStopTimeout();
-    soundRef.current.stop();
-    soundRef.current.seek(0);
-    soundRef.current.play();
-    setIsPlaying(true);
-  };
-
-  const stop = () => {
-    clearStopTimeout();
-    if (soundRef.current) {
-      soundRef.current.stop();
+  }, [audioUrl, retryKey, cleanup]);
+  useEffect(() => {
+    sound.current?.volume(muted ? 0 : volume);
+  }, [volume, muted]);
+  const play = useCallback(
+    (duration?: number) => {
+      if (!sound.current || status === "loading" || status === "error") return;
+      if (timeout.current) clearTimeout(timeout.current);
+      sound.current.stop();
+      sound.current.seek(0);
+      requestedDuration.current = duration;
+      sound.current.play();
+    },
+    [status],
+  );
+  const stop = useCallback(() => {
+    if (timeout.current) clearTimeout(timeout.current);
+    sound.current?.stop();
+  }, []);
+  const setVolume = (next: number) => {
+    const safe = Number.isFinite(next) ? Math.max(0, Math.min(1, next)) : 0.8;
+    setVolumeState(safe);
+    storage.set(VOLUME_KEY, String(safe));
+    if (safe > 0 && muted) {
+      setMutedState(false);
+      storage.set(MUTED_KEY, "false");
     }
-    setIsPlaying(false);
   };
-
-  return { isLoaded, isPlaying, playSegment, playFull, stop };
-};
+  const toggleMute = () =>
+    setMutedState((current) => {
+      storage.set(MUTED_KEY, String(!current));
+      return !current;
+    });
+  return {
+    status,
+    isPlaying: status === "playing",
+    play,
+    stop,
+    retry: () => {
+      if (status === "blocked") play(requestedDuration.current);
+      else setRetryKey((n) => n + 1);
+    },
+    volume,
+    setVolume,
+    muted,
+    toggleMute,
+  };
+}

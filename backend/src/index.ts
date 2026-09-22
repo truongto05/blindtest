@@ -1,48 +1,63 @@
-import 'dotenv/config';
-import express from 'express';
-import { createServer } from 'http';
-import { Server } from 'socket.io';
-import cors from 'cors';
+import "dotenv/config";
+import { createServer } from "node:http";
+import { Server } from "socket.io";
+import { createApp } from "./app";
+import { registerGameHandlers } from "./sockets/gameHandler";
 
-// Imports des routes et handlers (fichiers suivants)
-import playlistRoutes from './routes/playlistRoutes';
-import searchRoutes from './routes/searchRoutes';
-import quizRoutes from './routes/quizRoutes';
-import { registerGameHandlers } from './sockets/gameHandler';
+const port = Number(process.env.PORT || 3001);
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const isAllowed = (origin?: string) =>
+  !origin || allowedOrigins.includes(origin);
+const httpServer = createServer(
+  createApp({
+    allowedOrigins,
+    trustProxy: process.env.TRUST_PROXY === "true",
+  }),
+);
 
-const app = express();
-const httpServer = createServer(app);
-
-// Configuration Socket.io avec gestion du CORS pour le frontend
 const io = new Server(httpServer, {
-  cors: {
-    origin: "*", // En production, remplace par l'URL de ton site
-    methods: ["GET", "POST"]
-  }
+  cors: { origin: allowedOrigins, methods: ["GET", "POST"], credentials: true },
+  maxHttpBufferSize: 32_000,
+  pingInterval: 20_000,
+  pingTimeout: 15_000,
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 30_000,
+    skipMiddlewares: true,
+  },
 });
-
-// Middlewares
-app.use(cors());
-app.use(express.json());
-
-// Routes API modulaires
-app.use('/api/playlists', playlistRoutes);
-app.use('/api/search', searchRoutes);
-app.use('/api/quiz', quizRoutes);
-
-// Connexion des Sockets
-io.on('connection', (socket) => {
-  console.log(`⚡ Nouveau joueur connecté : ${socket.id}`);
-  
-  // On enregistre toute la logique de jeu (salon, scores, manches)
-  registerGameHandlers(io, socket);
-
-  socket.on('disconnect', () => {
-    console.log(`❌ Joueur déconnecté : ${socket.id}`);
+io.use((socket, next) =>
+  isAllowed(socket.handshake.headers.origin)
+    ? next()
+    : next(new Error("Origin non autorisée")),
+);
+io.on("connection", (socket) => {
+  let eventCount = 0;
+  let windowStarted = Date.now();
+  socket.use((_event, next) => {
+    const now = Date.now();
+    if (now - windowStarted >= 1_000) {
+      windowStarted = now;
+      eventCount = 0;
+    }
+    eventCount += 1;
+    if (eventCount > 30) return next(new Error("Trop de requêtes."));
+    next();
   });
+  registerGameHandlers(io, socket);
 });
 
-const PORT = Number(process.env.PORT) || 3001;
-httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Serveur Blindtest Pro lancé sur port ${PORT}`);
-});
+httpServer.listen(port, "0.0.0.0", () =>
+  console.info(`Pulse API listening on port ${port}`),
+);
+
+const shutdown = (signal: string) => {
+  console.info(`${signal}: arrêt gracieux`);
+  io.close();
+  httpServer.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 10_000).unref();
+};
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

@@ -1,248 +1,576 @@
-import React, { useState, useEffect } from 'react';
-import { socket } from './services/socketService';
-import { Howler } from 'howler';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
+import AccessibilityPanel from "./components/AccessibilityPanel";
+import Brand from "./components/Brand";
+import ConnectionNotice from "./components/ConnectionNotice";
+import GameBoard from "./components/GameBoard";
+import { PageLoading, PageNotFound } from "./components/ui/PageState";
+import Toast from "./components/ui/Toast";
+import { useRoom } from "./features/game/useRoom";
+import { useToast } from "./hooks/useToast";
+import EndScreen from "./pages/EndScreen";
+import Home from "./pages/Home";
+import Lobby from "./pages/Lobby";
+import SettingsPage from "./pages/Settings";
+import { GENRES } from "./domain/settings";
+import { applyHomeSelection, selectedHomeSelection } from "./domain/selections";
+import { storage } from "./services/storage";
+import { useAccount } from "./features/account/useAccount";
+import {
+  DEFAULT_SETTINGS,
+  type Playlist,
+  type QuizData,
+  type Settings,
+} from "./types/game";
 
-// Pages & UI
-import Toast from './components/ui/Toast';
-import Home from './pages/Home';
-import Lobby from './pages/Lobby';
-import SettingsPage from './pages/Settings';
-import PlaylistsPage from './pages/Playlists';
-import EndScreen from './pages/EndScreen';
-import GameBoard from './components/GameBoard';
+const Playlists = lazy(() => import("./pages/Playlists"));
+const PlaylistDetail = lazy(() => import("./pages/PlaylistDetail"));
+const SharedPlaylist = lazy(() => import("./pages/SharedPlaylist"));
+const PublicPlaylists = lazy(() => import("./pages/PublicPlaylists"));
+const LegalPage = lazy(() => import("./pages/LegalPage"));
+const Account = lazy(() => import("./pages/Account"));
+const Friends = lazy(() => import("./pages/Friends"));
 
-// Types
-export type GameMode = 'classic' | 'progressive';
-export type AnswerType = 'random' | 'both' | 'artist' | 'title';
-export type GenreType = 'all' | 'all_mix' | 'rap' | '80s' | 'rock' | 'electro' | 'pop' | 'francaise' | 'rnb' | 'metal' | 'reggae' | 'jazz' | 'rapus' | 'custom';
-export type GameType = 'music' | 'movie' | 'series' | 'screen';
-export type AnswerMode = 'choices' | 'input';
-export type Settings = { mode: GameMode; rounds: number; timeLimit: number; genre: GenreType; answerType: AnswerType; gameType: GameType; answerMode: AnswerMode; customPlaylistUrl: string; showPoster: boolean; };
-
-const DEFAULT_SETTINGS: Settings = { mode: 'classic', rounds: 5, timeLimit: 15, genre: 'all', answerType: 'random', gameType: 'music', answerMode: 'choices', customPlaylistUrl: '', showPoster: true };
-type GameState = 'home' | 'settings' | 'lobby' | 'playing' | 'end' | 'playlists';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+function initialSettings(): Settings {
+  try {
+    const saved = JSON.parse(
+      storage.get("pulse_settings") || "{}",
+    ) as Partial<Settings> | null;
+    if (!saved || typeof saved !== "object") return { ...DEFAULT_SETTINGS };
+    const numberInRange = (
+      value: unknown,
+      min: number,
+      max: number,
+      fallback: number,
+    ) =>
+      typeof value === "number" &&
+      Number.isInteger(value) &&
+      value >= min &&
+      value <= max
+        ? value
+        : fallback;
+    return {
+      mode:
+        saved.mode === "progressive" && saved.gameType === "music"
+          ? "progressive"
+          : "classic",
+      rounds: numberInRange(saved.rounds, 1, 30, DEFAULT_SETTINGS.rounds),
+      timeLimit: numberInRange(
+        saved.timeLimit,
+        5,
+        60,
+        DEFAULT_SETTINGS.timeLimit,
+      ),
+      genre: GENRES.some(([value]) => value === saved.genre)
+        ? saved.genre!
+        : "all",
+      answerType:
+        saved.answerType &&
+        ["random", "both", "artist", "title"].includes(saved.answerType)
+          ? saved.answerType
+          : "random",
+      answerMode: saved.answerMode === "input" ? "input" : "choices",
+      gameType:
+        saved.gameType &&
+        ["music", "movie", "series", "screen"].includes(saved.gameType)
+          ? saved.gameType
+          : "music",
+      pulsePlaylistId:
+        typeof saved.pulsePlaylistId === "string"
+          ? saved.pulsePlaylistId.slice(0, 36)
+          : "",
+      customPlaylistUrl:
+        typeof saved.customPlaylistUrl === "string"
+          ? saved.customPlaylistUrl.slice(0, 500)
+          : "",
+      showPoster: saved.showPoster !== false,
+    };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
 
 export default function App() {
-  const [gameState, setGameState] = useState<GameState>('home');
-  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [finalScore, setFinalScore] = useState(0);
-  const [gameHistory, setGameHistory] = useState<any[]>([]);
-
-  const [username, setUsername] = useState('');
-  const [roomCode, setRoomCode] = useState('');
-  const [players, setPlayers] = useState<any[]>([]);
-  const [isMultiplayer, setIsMultiplayer] = useState(false);
-  const [initialQuizData, setInitialQuizData] = useState<any>(null);
-  const [isStarting, setIsStarting] = useState(false);
-
-  // --- ÉTATS PLAYLISTS & MODALE ---
-  const [guestId, setGuestId] = useState<string>('');
-  const [importCode, setImportCode] = useState('');
-  const [libraryPlaylists, setLibraryPlaylists] = useState<any[]>([]);
-  const [selectedLibraryPlaylist, setSelectedLibraryPlaylist] = useState<any>(null);
-  const [addedTracks, setAddedTracks] = useState<Set<string>>(new Set());
-  
-  // Modale d'ajout
-  const [showPlaylistModal, setShowPlaylistModal] = useState<any>(null); 
-  const [newPlaylistName, setNewPlaylistName] = useState('');
-
-  const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
-
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  // Initialisation du Cadenas (GuestID)
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { toast, notify } = useToast();
+  const account = useAccount();
+  const [username, setUsername] = useState(
+    () => storage.get("pulse_username") || "",
+  );
+  const [guestOwnerId, setOwnerId] = useState(
+    () =>
+      storage.get("pulse_library_id") ||
+      `LIB-${crypto.randomUUID().toUpperCase()}`,
+  );
+  const [settings, setSettings] = useState(initialSettings);
+  const [solo, setSolo] = useState<{
+    score: number;
+    history: QuizData[];
+  } | null>(null);
+  const [soloStarted, setSoloStarted] = useState(false);
+  const game = useRoom(username, notify);
+  const previousAccount = useRef<string | null | undefined>(undefined);
+  const leaveRef = useRef(game.leave);
+  useLayoutEffect(() => {
+    leaveRef.current = game.leave;
+  }, [game.leave]);
   useEffect(() => {
-    let storedId = localStorage.getItem('blindtest_guest_id');
-    if (!storedId) {
-      storedId = 'JOUEUR-' + Math.random().toString(36).substring(2, 7).toUpperCase();
-      localStorage.setItem('blindtest_guest_id', storedId);
+    if (account.initializing) return;
+    const identity = account.session?.user.id || null;
+    if (
+      previousAccount.current !== undefined &&
+      previousAccount.current !== identity
+    ) {
+      setSolo(null);
+      setSoloStarted(false);
+      if (game.room || ["/play", "/results"].includes(location.pathname))
+        leaveRef.current();
     }
-    setGuestId(storedId);
-  }, []);
+    previousAccount.current = identity;
+  }, [
+    account.initializing,
+    account.session?.user.id,
+    game.room,
+    location.pathname,
+  ]);
+  const ownerId = account.initializing
+    ? ""
+    : account.session
+      ? account.profile?.id === account.session.user.id
+        ? account.libraryOwnerId || ""
+        : ""
+      : guestOwnerId;
+  const libraryGate = (
+    <main id="main-content" className="page max-w-2xl">
+      <h1 className="text-2xl font-bold">Retrouver ta bibliothèque</h1>
+      <p className="mt-3 text-zinc-400">
+        {account.initializing || account.loading
+          ? "Connexion à ton compte…"
+          : "Ouvre ton compte pour terminer ton profil ou rétablir la connexion."}
+      </p>
+      <Link className="btn-primary mt-5" to="/compte">
+        Mon compte
+      </Link>
+    </main>
+  );
 
-  // Gestion des Sockets
   useEffect(() => {
-    socket.on('room_updated', (updatedPlayers: any[]) => setPlayers(updatedPlayers));
-    socket.on('new_round', (data: any) => {
-      setInitialQuizData(data);
-      if (data.settings) setSettings(data.settings);
-      setIsStarting(false); 
-      setGameState('playing');
-    });
-    socket.on('room_error', (payload: { message?: string } | string) => {
-      setIsStarting(false);
-      showToast(typeof payload === 'string' ? payload : payload.message || 'Action impossible.', 'error');
-    });
-    socket.on('kicked_from_room', () => {
-      setIsStarting(false);
-      setPlayers([]);
-      setRoomCode('');
-      setIsMultiplayer(false);
-      setInitialQuizData(null);
-      setGameState('home');
-      showToast('Tu as ete expulse du salon.', 'error');
-    });
-    return () => { socket.off('room_updated'); socket.off('new_round'); socket.off('room_error'); socket.off('kicked_from_room'); };
-  }, []);
+    if (account.profile?.id === account.session?.user.id && account.profile)
+      setUsername(account.profile.displayName);
+  }, [
+    account.profile?.id,
+    account.profile?.displayName,
+    account.session?.user.id,
+  ]);
 
-  // --- LOGIQUE PLAYLISTS ---
-  
-  // Fonction pour rafraîchir la liste complète des playlists
-  const fetchLibrary = async () => {
-    if (!guestId) return;
-    try {
-      const res = await fetch(`${API_URL}/api/playlists?ownerId=${guestId}`);
-      const data = await res.json();
-      setLibraryPlaylists(data);
-    } catch (e) { console.error("Erreur fetch library", e); }
+  useEffect(() => {
+    if (location.pathname !== "/play") setSoloStarted(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (
+      game.room &&
+      location.pathname === `/rooms/${game.room.roomCode}/settings`
+    )
+      setSettings(game.room.settings);
+  }, [game.room?.roomCode, location.pathname]);
+
+  useEffect(() => {
+    storage.set("pulse_library_id", guestOwnerId);
+  }, [guestOwnerId]);
+  useEffect(() => {
+    storage.set("pulse_settings", JSON.stringify(settings));
+  }, [settings]);
+  useEffect(() => {
+    storage.set("pulse_username", username.trim());
+  }, [username]);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const main = document.getElementById("main-content");
+      main?.setAttribute("tabindex", "-1");
+      main?.focus({ preventScroll: true });
+      window.scrollTo({ top: 0, behavior: "instant" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [location.pathname]);
+
+  const playPlaylist = (playlist: Playlist) => {
+    setSettings((previous) => ({
+      ...previous,
+      gameType: "music",
+      genre: "pulse",
+      pulsePlaylistId: playlist.id,
+      answerType: "title",
+      answerMode: playlist.playableTrackCount >= 4 ? "choices" : "input",
+      rounds: Math.max(
+        1,
+        Math.min(previous.rounds, playlist.playableTrackCount),
+      ),
+    }));
+    navigate("/settings");
   };
-
-  // On fetch la bibliothèque dès que l'ID change ou qu'on va sur les pages concernées
-  useEffect(() => {
-    if (guestId) fetchLibrary();
-  }, [guestId, gameState]);
-
-  const handleAddToPlaylist = async (playlistId: string, track: any) => {
-    try {
-      const res = await fetch(`${API_URL}/api/playlists/${playlistId}/tracks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deezerId: track.trackId,
-          title: track.trackTitle || track.correctAnswer,
-          artist: track.artistName || 'Inconnu',
-          coverUrl: track.coverUrl || '',
-          previewUrl: track.audioUrl || ''
-        })
-      });
-      
-      if (res.ok) {
-        showToast(`✅ Musique ajoutée !`);
-        setAddedTracks(prev => new Set(prev).add(track.trackId));
-        setShowPlaylistModal(null);
-        // CRUCIAL : On rafraîchit la library pour mettre à jour les "est déjà dedans" et les compteurs
-        await fetchLibrary();
+  const leave = () => {
+    game.leave();
+  };
+  const configure = (kind: "solo" | "create" | "edit") => (
+    <SettingsPage
+      key={kind}
+      settings={settings}
+      setSettings={setSettings}
+      ownerId={ownerId}
+      isMultiplayer={kind !== "solo"}
+      isEditing={kind === "edit"}
+      pending={Boolean(game.pending)}
+      multiplayerConnected={game.connection === "connected"}
+      onBack={() =>
+        navigate(
+          kind === "edit" && game.room ? `/rooms/${game.room.roomCode}` : "/",
+        )
       }
-    } catch (e) { showToast("❌ Erreur lors de l'ajout", "error"); }
-  };
-
-  const handleCreatePlaylist = async (e: React.FormEvent, track: any) => {
-    e.preventDefault();
-    if (!newPlaylistName.trim()) return;
-    try {
-      const res = await fetch(`${API_URL}/api/playlists`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newPlaylistName, ownerId: guestId }) 
-      });
-      const newPlaylist = await res.json();
-      await handleAddToPlaylist(newPlaylist.id, track);
-      setNewPlaylistName('');
-    } catch (e) { showToast("❌ Erreur de création", "error"); }
-  };
-
-  const handleStartMultiplayer = () => {
-    const me = players.find((player) => player.id === socket.id);
-    if (!me?.isHost) {
-      showToast('Seul le chef du salon peut lancer la partie.', 'error');
-      return;
-    }
-
-    setIsStarting(true);
-    socket.emit('start_game', { roomCode, settings });
-  };
-
-  const handleKickPlayer = (playerId: string) => {
-    socket.emit('kick_player', { roomCode, playerId });
-  };
+      onSave={() => {
+        if (kind === "create") game.create(settings, ownerId);
+        else if (kind === "edit") game.updateSettings(settings, ownerId);
+        else {
+          setSolo(null);
+          setSoloStarted(true);
+          navigate("/play");
+        }
+      }}
+    />
+  );
+  const endScreen = (multiplayer: boolean) => (
+    <EndScreen
+      score={multiplayer ? game.me?.score || 0 : solo?.score || 0}
+      history={multiplayer ? game.history : solo?.history || []}
+      players={multiplayer ? game.room?.players || [] : []}
+      playerId={game.playerId}
+      ownerId={ownerId}
+      notify={notify}
+      canReplay={!multiplayer || Boolean(game.me?.isHost)}
+      onReplay={() =>
+        multiplayer ? game.command("return_to_lobby") : navigate("/settings")
+      }
+      onHome={leave}
+    />
+  );
+  const board = (multiplayer: boolean) => (
+    <GameBoard
+      settings={multiplayer && game.room ? game.room.settings : settings}
+      ownerId={ownerId}
+      isMultiplayer={multiplayer}
+      room={multiplayer ? game.room : null}
+      playerId={game.playerId}
+      round={multiplayer ? game.round : null}
+      reveal={multiplayer ? game.reveal : null}
+      connection={game.connection}
+      onSubmitMulti={game.submit}
+      onRequestSegment={game.requestSegment}
+      onSoloEnd={(score, history) => {
+        setSolo({ score, history });
+        navigate("/results", { replace: true });
+      }}
+      onExit={leave}
+    />
+  );
+  const routeRoomCode = /^\/rooms\/([A-Z0-9]{6})(?:\/|$)/.exec(
+    location.pathname,
+  )?.[1];
+  const roomPage =
+    !game.room || game.room.roomCode !== routeRoomCode ? (
+      <PageLoading
+        title="Connexion au salon"
+        text={
+          game.connection === "connected"
+            ? "Nous retrouvons ta place…"
+            : game.connection === "offline"
+              ? "Tu es hors connexion. Nous réessaierons au retour du réseau."
+              : "Connexion en cours. Si le serveur démarre, cela peut prendre un moment. La reconnexion est automatique."
+        }
+      />
+    ) : game.room.phase === "finished" ? (
+      endScreen(true)
+    ) : game.room.phase !== "lobby" ? (
+      board(true)
+    ) : (
+      <Lobby
+        room={game.room}
+        me={game.me}
+        connection={game.connection}
+        onBack={leave}
+        onConfigure={() => {
+          setSettings(game.room!.settings);
+          navigate(`/rooms/${game.room!.roomCode}/settings`);
+        }}
+        onToggleReady={() => game.command("toggle_ready")}
+        onInviteFriends={() => navigate("/amis")}
+        onStart={() => game.command("start_game")}
+        onKick={game.kick}
+      />
+    );
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans relative overflow-hidden">
-      {/* Background FX */}
-      <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] rounded-full pointer-events-none"></div>
-      
+    <div className="app-shell">
+      <a href="#main-content" className="skip-link">
+        Aller au contenu
+      </a>
       <Toast toast={toast} />
-
-      <div className="relative z-10">
-        {gameState === 'home' && <Home onJoinMulti={(code) => { setIsMultiplayer(true); setRoomCode(code); setGameState('lobby'); }} onPlaySolo={() => { setIsMultiplayer(false); setGameState('settings'); }} onGoPlaylists={() => setGameState('playlists')} />}
-
-        {gameState === 'lobby' && <Lobby roomCode={roomCode} players={players} username={username} setUsername={setUsername} isStarting={isStarting} onBack={() => setGameState('home')} onSettings={() => setGameState('settings')} onStart={handleStartMultiplayer} onKick={handleKickPlayer} />}
-
-        {gameState === 'settings' && <SettingsPage settings={settings} setSettings={setSettings} isMultiplayer={isMultiplayer} onBack={() => setGameState(isMultiplayer ? 'lobby' : 'home')} onSave={() => setGameState(isMultiplayer ? 'lobby' : 'playing')} />}
-
-        {gameState === 'playing' && <GameBoard settings={settings} isMultiplayer={isMultiplayer} roomCode={roomCode} initialData={initialQuizData} onGameEnd={(score, history) => { setFinalScore(score); setGameHistory(history); setGameState('end'); }} />}
-
-        {gameState === 'end' && (
-          <EndScreen 
-            score={finalScore} history={gameHistory} addedTracks={addedTracks}
-            onReplay={() => { setGameState(isMultiplayer ? 'lobby' : 'home'); setFinalScore(0); setGameHistory([]); setAddedTracks(new Set()); }}
-            onShowPlaylistModal={(track) => setShowPlaylistModal(track)}
-          />
-        )}
-
-        {gameState === 'playlists' && (
-          <PlaylistsPage 
-            guestId={guestId} 
-            importCode={importCode} setImportCode={setImportCode} 
-            onImportCode={(e) => { e.preventDefault(); localStorage.setItem('blindtest_guest_id', importCode.toUpperCase()); setGuestId(importCode.toUpperCase()); setImportCode(''); showToast("🔑 Cadenas mis à jour"); }} 
-            libraryPlaylists={libraryPlaylists} 
-            selectedPlaylist={selectedLibraryPlaylist} setSelectedPlaylist={setSelectedLibraryPlaylist} 
-            onBack={() => setGameState('home')} 
-          />
-        )}
-      </div>
-
-      {/* --- MODALE D'AJOUT CORRIGÉE --- */}
-      {showPlaylistModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-[100] animate-in fade-in">
-          <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl relative">
-            <button onClick={() => setShowPlaylistModal(null)} className="absolute top-6 right-6 text-zinc-500 hover:text-white font-black text-xl">✕</button>
-            <h3 className="text-2xl font-black mb-2">Sauvegarder</h3>
-            <p className="text-zinc-500 text-sm mb-8">Choisis une playlist pour ce titre.</p>
-            
-            <div className="space-y-2 mb-8 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
-              {libraryPlaylists.map(pl => {
-                // LOGIQUE "EST DÉJÀ DEDANS"
-                const isAlreadyIn = pl.tracks?.some((t: any) => String(t.deezerId) === String(showPlaylistModal.trackId));
-                
-                return (
-                  <button 
-                    key={pl.id} 
-                    disabled={isAlreadyIn}
-                    onClick={() => handleAddToPlaylist(pl.id, showPlaylistModal)} 
-                    className={`w-full text-left p-4 rounded-2xl border transition-all flex justify-between items-center group ${
-                      isAlreadyIn ? 'bg-zinc-800/50 border-emerald-500/30 opacity-60 cursor-not-allowed' : 'bg-zinc-950 border-zinc-800 hover:border-indigo-500'
-                    }`}
-                  >
-                    <div>
-                      <span className={`font-bold block ${isAlreadyIn ? 'text-zinc-500' : 'text-zinc-100'}`}>{pl.name}</span>
-                      <span className="text-[10px] text-zinc-500 uppercase tracking-widest">{pl.tracks?.length || 0} titres</span>
-                    </div>
-                    {isAlreadyIn ? (
-                      <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-lg">DÉJÀ DEDANS ✓</span>
-                    ) : (
-                      <span className="text-xs text-zinc-600 group-hover:text-indigo-400">Ajouter +</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            <form onSubmit={(e) => handleCreatePlaylist(e, showPlaylistModal)} className="pt-6 border-t border-zinc-800">
-              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] block mb-3">Nouvelle Playlist</label>
-              <div className="flex gap-2">
-                <input type="text" placeholder="Nom..." value={newPlaylistName} onChange={e => setNewPlaylistName(e.target.value)} className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2 outline-none focus:border-indigo-500 font-bold" />
-                <button type="submit" disabled={!newPlaylistName.trim()} className="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-xl font-bold transition-all disabled:opacity-50">CRÉER</button>
-              </div>
-            </form>
-          </div>
+      {(location.pathname === "/" ||
+        location.pathname === "/rooms/new" ||
+        location.pathname === "/settings") && (
+        <ConnectionNotice
+          state={game.connection}
+          onRetry={game.retryConnection}
+        />
+      )}
+      {game.pending && (
+        <div
+          role="status"
+          className="fixed inset-x-4 top-3 z-40 mx-auto w-fit max-w-[calc(100%-2rem)] rounded-md border border-beat-400/30 bg-ink-800 px-5 py-3 text-center text-sm text-beat-200"
+        >
+          {game.pending === "create"
+            ? "Création du salon…"
+            : game.pending === "settings"
+              ? "Enregistrement des réglages…"
+              : game.pending === "start"
+                ? "Vérification de la playlist et démarrage…"
+                : "Connexion au salon…"}
         </div>
       )}
+      <Suspense fallback={<PageLoading />}>
+        <Routes>
+          <Route
+            path="/compte"
+            element={
+              <Account
+                key={account.session?.user.id || "guest"}
+                account={account}
+                guestOwnerId={guestOwnerId}
+                onSignedOut={leave}
+              />
+            }
+          />
+          <Route
+            path="/compte/reinitialiser"
+            element={
+              <Account
+                account={account}
+                guestOwnerId={guestOwnerId}
+                onSignedOut={leave}
+              />
+            }
+          />
+          <Route
+            path="/amis"
+            element={
+              <Friends
+                key={account.session?.user.id || "guest"}
+                account={account}
+                currentRoom={game.room}
+                playerToken={game.playerToken}
+              />
+            }
+          />
+          <Route
+            path="/"
+            element={
+              <Home
+                accountName={account.profile?.displayName}
+                settings={settings}
+                onSelect={(id) =>
+                  setSettings((previous) => applyHomeSelection(previous, id))
+                }
+                onQuickPlay={() => {
+                  if (
+                    game.connection !== "connected" ||
+                    game.pending ||
+                    !selectedHomeSelection(settings)
+                  )
+                    return;
+                  setSolo(null);
+                  setSoloStarted(true);
+                  navigate("/play");
+                }}
+                pending={Boolean(game.pending)}
+                canJoin={game.connection === "connected"}
+                username={username}
+                setUsername={setUsername}
+                onCreate={(name) => {
+                  setUsername(name.trim());
+                  navigate("/rooms/new");
+                }}
+                onJoin={(code, name) => {
+                  setUsername(name.trim());
+                  game.join(code, name);
+                }}
+                onSolo={() => navigate("/settings")}
+                onPlaylists={() => navigate("/playlists")}
+              />
+            }
+          />
+          <Route path="/settings" element={configure("solo")} />
+          <Route
+            path="/rooms/new"
+            element={
+              username.trim().length >= 2 ? (
+                configure("create")
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
+          <Route
+            path="/rooms/:code"
+            element={<RoomRoute>{roomPage}</RoomRoute>}
+          />
+          <Route
+            path="/rooms/:code/settings"
+            element={
+              <RoomRoute>
+                {!game.room || game.room.roomCode !== routeRoomCode ? (
+                  roomPage
+                ) : game.me?.isHost && game.room.phase === "lobby" ? (
+                  configure("edit")
+                ) : (
+                  <Navigate to={`/rooms/${game.room.roomCode}`} replace />
+                )}
+              </RoomRoute>
+            }
+          />
+          <Route
+            path="/play"
+            element={
+              soloStarted ? board(false) : <Navigate to="/settings" replace />
+            }
+          />
+          <Route
+            path="/results"
+            element={
+              solo ? endScreen(false) : <Navigate to="/settings" replace />
+            }
+          />
+          <Route
+            path="/playlists"
+            element={
+              ownerId ? (
+                <Playlists
+                  key={ownerId}
+                  accountLinked={Boolean(account.session)}
+                  ownerId={ownerId}
+                  onRestoreOwner={setOwnerId}
+                  notify={notify}
+                />
+              ) : (
+                libraryGate
+              )
+            }
+          />
+          <Route path="/playlists/public" element={<PublicPlaylists />} />
+          <Route
+            path="/playlists/:id"
+            element={
+              ownerId ? (
+                <PlaylistRoute
+                  key={ownerId}
+                  ownerId={ownerId}
+                  notify={notify}
+                  onPlay={playPlaylist}
+                />
+              ) : (
+                libraryGate
+              )
+            }
+          />
+          <Route
+            path="/p/:shareId"
+            element={<SharedRoute ownerId={ownerId} notify={notify} />}
+          />
+          <Route
+            path="/confidentialite"
+            element={<LegalPage kind="privacy" />}
+          />
+          <Route path="/cookies" element={<LegalPage kind="cookies" />} />
+          <Route path="/conditions" element={<LegalPage kind="terms" />} />
+          <Route
+            path="/mentions-legales"
+            element={<LegalPage kind="legal" />}
+          />
+          <Route path="*" element={<PageNotFound />} />
+        </Routes>
+      </Suspense>
+      <footer
+        className="mx-auto flex max-w-6xl flex-wrap justify-center gap-x-5 gap-y-1 px-5 pb-4 text-xs text-zinc-400"
+        aria-label="Informations sur Pulse"
+      >
+        <Link
+          className="mr-auto inline-flex min-h-11 items-center"
+          to="/"
+          aria-label="Pulse — accueil"
+        >
+          <Brand />
+        </Link>
+        <Link
+          className="inline-flex min-h-11 items-center hover:text-white"
+          to="/mentions-legales"
+        >
+          Mentions légales
+        </Link>
+        <Link
+          className="inline-flex min-h-11 items-center hover:text-white"
+          to="/confidentialite"
+        >
+          Confidentialité
+        </Link>
+        <Link
+          className="inline-flex min-h-11 items-center hover:text-white"
+          to="/cookies"
+        >
+          Stockage & cookies
+        </Link>
+        <Link
+          className="inline-flex min-h-11 items-center hover:text-white"
+          to="/conditions"
+        >
+          Conditions d’utilisation
+        </Link>
+        <AccessibilityPanel />
+      </footer>
     </div>
   );
+}
+
+function RoomRoute({ children }: { children: ReactNode }) {
+  const { code = "" } = useParams();
+  return /^[A-Z0-9]{6}$/.test(code) ? children : <PageNotFound />;
+}
+
+function PlaylistRoute(
+  props: Omit<Parameters<typeof PlaylistDetail>[0], "playlistId">,
+) {
+  const { id = "" } = useParams();
+  return (
+    <PlaylistDetail key={`${props.ownerId}:${id}`} {...props} playlistId={id} />
+  );
+}
+function SharedRoute(
+  props: Omit<Parameters<typeof SharedPlaylist>[0], "shareId">,
+) {
+  const { shareId = "" } = useParams();
+  return <SharedPlaylist key={shareId} {...props} shareId={shareId} />;
 }

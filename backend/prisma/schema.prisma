@@ -7,13 +7,25 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum PlaylistVisibility {
+  PRIVATE
+  UNLISTED
+  PUBLIC
+}
+
 model Playlist {
-  id        String   @id @default(uuid())
-  name      String
-  ownerId   String 
-  createdAt DateTime @default(now())
-  
-  tracks    Track[]  
+  id         String             @id @default(uuid())
+  name       String
+  ownerId    String
+  visibility PlaylistVisibility @default(PRIVATE)
+  shareId    String?            @unique
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  tracks     Track[]
+
+  @@index([ownerId, createdAt])
+  @@index([visibility, createdAt])
 }
 
 model Track {
@@ -24,4 +36,78 @@ model Track {
   previewUrl String
 
   playlists  Playlist[] 
+}
+
+enum FriendConnectionStatus {
+  PENDING
+  ACCEPTED
+}
+
+// Auth credentials stay in Supabase Auth. These rows are server-only application data.
+model AccountProfile {
+  id             String   @id @db.Uuid
+  displayName    String   @db.VarChar(24)
+  friendCode     String   @unique @db.VarChar(18)
+  libraryOwnerId String   @unique @db.VarChar(80)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  lowConnections  FriendConnection[] @relation("LowProfile")
+  highConnections FriendConnection[] @relation("HighProfile")
+  actionAttempts  AccountActionAttempt[]
+  libraryImports  LibraryImport[]
+  sentInvitations RoomInvitation[] @relation("InvitationSender")
+  receivedInvitations RoomInvitation[] @relation("InvitationRecipient")
+}
+
+model FriendConnection {
+  id          String                 @id @default(uuid()) @db.Uuid
+  lowId       String                 @db.Uuid
+  highId      String                 @db.Uuid
+  requesterId String                 @db.Uuid
+  status      FriendConnectionStatus @default(PENDING)
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  lowProfile  AccountProfile @relation("LowProfile", fields: [lowId], references: [id], onDelete: Cascade)
+  highProfile AccountProfile @relation("HighProfile", fields: [highId], references: [id], onDelete: Cascade)
+
+  @@unique([lowId, highId])
+  @@index([requesterId, status])
+  @@index([highId, status])
+}
+
+model AccountActionAttempt {
+  id        String   @id @default(uuid()) @db.Uuid
+  profileId String   @db.Uuid
+  action    String   @db.VarChar(20)
+  createdAt DateTime @default(now())
+  profile   AccountProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, action, createdAt])
+}
+
+model RoomInvitation {
+  id          String   @id @default(uuid()) @db.Uuid
+  senderId    String   @db.Uuid
+  recipientId String   @db.Uuid
+  roomCode    String   @db.VarChar(6)
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+  sender      AccountProfile @relation("InvitationSender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient   AccountProfile @relation("InvitationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, recipientId, roomCode])
+  @@index([recipientId, expiresAt])
+}
+
+model LibraryImport {
+  id            String   @id @default(uuid()) @db.Uuid
+  profileId     String   @db.Uuid
+  sourceOwnerId String   @db.VarChar(80)
+  importedCount Int
+  createdAt     DateTime @default(now())
+  profile       AccountProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, sourceOwnerId])
 }

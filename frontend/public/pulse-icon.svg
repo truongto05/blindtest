@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Pulse">
+  <rect width="512" height="512" rx="128" fill="#d1ed62"/>
+  <path fill="#101410" fill-rule="evenodd" d="M152 392V120h126a104 104 0 0 1 0 208h-54v64Zm86-215v94l78-47Z"/>
+</svg>
